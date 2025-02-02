@@ -31,34 +31,24 @@ component {
 		,	"INACTIVE"= 3
 		,	"FAILED"= 4
 		};
-		// 0= NEVER= Never send you any notification 
-		// 1= FAILURE= Notify you when cronjob fails 
-		// 2= ALWAYS= Notify you when cronjob is executed 
-		// 3= DISABLED= Notify you only when cronjob disabled because of multiple consecutive failures 
-		this.notifyCodes= {
-			"0"= "NEVER"
-		,	"1"= "FAILURE"
-		,	"2"= "ALWAYS"
-		,	"3"= "DISABLED"
-		};
-		this.notifyLookup= {
-			"NEVER"= 0
-		,	"FAILURE"= 1
-		,	"ALWAYS"= 2
-		,	"DISABLED"= 3
-		};
 		this.jobCache= {};
 		this.groupCache= {};
 		// alternate names for methods 
 		this.cronAdd= this.jobAdd;
 		this.cronEdit= this.jobEdit;
+		this.cronUpsert= this.jobUpsert;
 		this.cronGet= this.jobGet;
 		this.cronEnable= this.jobEnable;
 		this.cronDisable= this.jobDisable;
+		this.cronPause= this.jobPause;
 		this.cronToggleMatches= this.jobToggleMatches;
 		this.cronDelete= this.jobDelete;
 		this.cronRun= this.jobRun;
 		this.cronLogs= this.jobLogs;
+		this.cronFailures= this.jobFailures;
+		this.cronNext= this.jobNext;
+		this.cronList= this.jobList;
+		this.cronLookup= this.jobLookup;
 
 		this.jobNotFound= {
 			success= false
@@ -87,31 +77,9 @@ component {
 		return;
 	}
 
-	function time() {
-		return this.apiRequest( api= "server.time" );
-	}
-
-	function useragent() {
-		return this.apiRequest( api= "server.useragent" );
-	}
-
-	function ipList() {
-		var out= this.apiRequest( api= "server.ip" );
-		out.ip4= [];
-		out.ip6= [];
-		if( out.success ) {
-			var item= "";
-			for( item in out.response.data ) {
-				arrayAppend( out.ip4, out.response.data[ item ].v4 );
-				arrayAppend( out.ip6, out.response.data[ item ].v6 );
-			}
-		}
-		return out;
-	}
-
 	////////////////////////////////////////////////////////////////////////////////////
 	// CRON JOB METHODS
-	// https://www.fastcron.com/documentation/api/cron
+	// https://www.fastcron.com/reference/cron
 	////////////////////////////////////////////////////////////////////////////////////
 
 	function jobAdd(
@@ -124,32 +92,49 @@ component {
 	,	month
 	,	weekday
 	,	string expression= ""
+	,	string filter
+	,	numeric delay= 0
 	,	string timezone
+	,	numeric timeout = 1800
+	,	string httpUsername
+	,	string httpPassword
 	,	string httpMethod= "GET"
 	,	string httpHeaders
 	,	string userAgent
 	,	string username
 	,	string password
 	,	string postData= ""
-	,	string notify= "NEVER"
-	,	string notifyEvery= 1
-	,	string failureThreshold= 10
-	,	string pattern= ""
-	,	string group= ""
+	,	boolean notify= false
+	,	numeric notifyEvery= 1
+	,	numeric failureThreshold= 10
+	,	string pattern
+	,	string group
 	,	numeric retry= 3
 	,	numeric retryAfter= 5
 	,	boolean single= false
+	,	numeric instances= 0
 	,	boolean retryFailed= true
 	) {
-		if( structKeyExists( arguments, "notify" ) && !isNumeric( arguments.notify ) ) {
-			arguments.notify= this.notifyLookup[ arguments.notify ];
+		if( structKeyExists( arguments, "group" ) ) {
+			if( isNumeric( arguments.group ) ) {
+				arguments.group= arguments.group;
+			} else {
+				arguments.group= this.groupLookup( arguments.group );
+			}
 		}
-		if( isNumeric( arguments.group ) ) {
-			arguments.group= arguments.group;
-		} else {
-			arguments.group= this.groupLookup( arguments.group );
+		if( arguments.single ) {
+			arguments.instances = 1;
 		}
-		var out= this.apiRequest( api= "cron.add", argumentCollection= arguments );
+		structDelete( arguments, "single" );
+		if( structKeyExists( arguments, "httpUsername" ) ) {
+			arguments[ "username" ] = arguments.httpUsername;
+			structDelete( arguments, "httpUsername" );
+		}
+		if( structKeyExists( arguments, "httpPassword" ) ) {
+			arguments[ "password" ] = arguments.httpPassword;
+			structDelete( arguments, "httpPassword" );
+		}
+		var out= this.apiRequest( api= "cron_add", argumentCollection= arguments );
 		// cache new job 
 		if( out.success ) {
 			this.jobCache[ out.response.data.id ]= out.response.data.id;
@@ -170,18 +155,24 @@ component {
 	,	month
 	,	weekday
 	,	string expression
+	,	string filter
+	,	numeric delay
 	,	string timezone
+	,	numeric timeout
+	,	string httpUsername
+	,	string httpPassword
 	,	string httpMethod
 	,	string postData
-	,	string notify
-	,	string notifyEvery
-	,	string failureThreshold
+	,	boolean notify
+	,	numeric notifyEvery
+	,	numeric failureThreshold
 	,	string pattern
 	,	string group
-	,	string retry= ""
-	,	string retryAfter= ""
-	,	string single= ""
-	,	string retryFailed= ""
+	,	numeric retry
+	,	numeric retryAfter
+	,	boolean single
+	,	numeric instances
+	,	boolean retryFailed
 	) {
 		if( isNumeric( arguments.idOrName ) ) {
 			arguments.id= arguments.idOrName;
@@ -193,15 +184,26 @@ component {
 			return this.jobNotFound;
 		}
 		structDelete( arguments, "idOrName" );
-		if( structKeyExists( arguments, "notify" ) && !isNumeric( arguments.notify ) ) {
-			arguments.notify= this.notifyLookup[ arguments.notify ];
+		if( structKeyExists( arguments, "group" ) ) {
+			if( isNumeric( arguments.group ) ) {
+				arguments.group= arguments.group;
+			} else {
+				arguments.group= this.groupLookup( arguments.group );
+			}
 		}
-		if( structKeyExists( arguments, "group" ) && isNumeric( arguments.group ) ) {
-			arguments.group= arguments.group;
-		} else {
-			arguments.group= this.groupLookup( arguments.group );
+		if( arguments.single ?: false ) {
+			arguments.instances = 1;
 		}
-		var out= this.apiRequest( api= "cron.edit", argumentCollection= arguments );
+		structDelete( arguments, "single" );
+		if( structKeyExists( arguments, "httpUsername" ) ) {
+			arguments[ "username" ] = arguments.httpUsername;
+			structDelete( arguments, "httpUsername" );
+		}
+		if( structKeyExists( arguments, "httpPassword" ) ) {
+			arguments[ "password" ] = arguments.httpPassword;
+			structDelete( arguments, "httpPassword" );
+		}
+		var out= this.apiRequest( api= "cron_edit", argumentCollection= arguments );
 		// cache name job 
 		if( out.success ) {
 			this.jobCache[ out.response.data.id ]= out.response.data.id;
@@ -222,18 +224,24 @@ component {
 	,	month
 	,	weekday
 	,	string expression
+	,	string filter
+	,	numeric delay
 	,	string timezone
+	,	numeric timeout
+	,	string httpUsername
+	,	string httpPassword
 	,	string httpMethod
 	,	string postData
-	,	string notify
-	,	string notifyEvery
-	,	string failureThreshold
+	,	boolean notify
+	,	numeric notifyEvery
+	,	numeric failureThreshold
 	,	string pattern
 	,	string group
-	,	string retry= ""
-	,	string retryAfter= ""
-	,	string single= ""
-	,	string retryFailed= ""
+	,	numeric retry
+	,	numeric retryAfter
+	,	boolean single
+	,	numeric instances
+	,	boolean retryFailed
 	) {
 		if( isNumeric( arguments.idOrName ) ) {
 			arguments.id= arguments.idOrName;
@@ -245,21 +253,32 @@ component {
 			arguments.name= arguments.idOrName;
 		}
 		structDelete( arguments, "idOrName" );
-		if( structKeyExists( arguments, "notify" ) && !isNumeric( arguments.notify ) ) {
-			arguments.notify= this.notifyLookup[ arguments.notify ];
+		if( structKeyExists( arguments, "group" ) ) {
+			if( isNumeric( arguments.group ) ) {
+				arguments.group= arguments.group;
+			} else {
+				arguments.group= this.groupLookup( arguments.group );
+			}
 		}
-		if( structKeyExists( arguments, "group" ) && isNumeric( arguments.group ) ) {
-			arguments.group= arguments.group;
-		} else {
-			arguments.group= this.groupLookup( arguments.group );
+		if( arguments.single ?: false ) {
+			arguments.instances = 1;
+		}
+		structDelete( arguments, "single" );
+		if( structKeyExists( arguments, "httpUsername" ) ) {
+			arguments[ "username" ] = arguments.httpUsername;
+			structDelete( arguments, "httpUsername" );
+		}
+		if( structKeyExists( arguments, "httpPassword" ) ) {
+			arguments[ "password" ] = arguments.httpPassword;
+			structDelete( arguments, "httpPassword" );
 		}
 		var out;
 		if( arguments.id < 0 ) {
 			structDelete( arguments, "id" );
-			out= this.apiRequest( api= "cron.add", argumentCollection= arguments );
+			out= this.apiRequest( api= "cron_add", argumentCollection= arguments );
 		}
 		else {
-			out= this.apiRequest( api= "cron.edit", argumentCollection= arguments );
+			out= this.apiRequest( api= "cron_edit", argumentCollection= arguments );
 		}
 		// cache name job 
 		if( out.success ) {
@@ -280,7 +299,7 @@ component {
 		if( arguments.id < 0 ) {
 			var out= this.jobNotFound;
 		} else {
-			var out= this.apiRequest( api= "cron.get", id= arguments.id );
+			var out= this.apiRequest( api= "cron_get", id= arguments.id );
 			out.job= {};
 			if( out.success ) {
 				out.job= out.response.data;
@@ -298,7 +317,7 @@ component {
 		if( arguments.id < 0 ) {
 			var out= this.jobNotFound;
 		} else {
-			var out= this.apiRequest( api= "cron.enable", id= arguments.id );
+			var out= this.apiRequest( api= "cron_enable", id= arguments.id );
 		}
 		return out;
 	}
@@ -312,7 +331,7 @@ component {
 		if( arguments.id < 0 ) {
 			var out= this.jobNotFound;
 		} else {
-			var out= this.apiRequest( api= "cron.disable", id= arguments.id );
+			var out= this.apiRequest( api= "cron_disable", id= arguments.id );
 		}
 		return out;
 	}
@@ -326,7 +345,7 @@ component {
 		if( arguments.id < 0 ) {
 			var out= this.jobNotFound;
 		} else {
-			var out= this.apiRequest( api= "cron.pause", id= arguments.id, for= arguments.length );
+			var out= this.apiRequest( api= "cron_pause", id= arguments.id, for= arguments.length );
 		}
 		return out;
 	}
@@ -359,7 +378,7 @@ component {
 		if( arguments.id < 0 ) {
 			var out= this.jobNotFound;
 		} else {
-			var out= this.apiRequest( api= "cron.delete", id= arguments.id );
+			var out= this.apiRequest( api= "cron_delete", id= arguments.id );
 			// un-cache job 
 			if( out.success ) {
 				structDelete( this.jobLookup, arguments.id );
@@ -378,7 +397,7 @@ component {
 		if( arguments.id < 0 ) {
 			var out= this.jobNotFound;
 		} else {
-			var out= this.apiRequest( api= "cron.run", id= arguments.id );
+			var out= this.apiRequest( api= "cron_run", id= arguments.id );
 		}
 		return out;
 	}
@@ -392,7 +411,7 @@ component {
 		if( arguments.id < 0 ) {
 			var out= this.jobNotFound;
 		} else {
-			var out= this.apiRequest( api= "cron.logs", id= arguments.id, limit= arguments.limit );
+			var out= this.apiRequest( api= "cron_logs", id= arguments.id, limit= arguments.limit );
 		}
 		return out;
 	}
@@ -406,13 +425,27 @@ component {
 		if( arguments.id < 0 ) {
 			var out= this.jobNotFound;
 		} else {
-			var out= this.apiRequest( api= "cron.failures", id= arguments.id );
+			var out= this.apiRequest( api= "cron_failures", id= arguments.id );
+		}
+		return out;
+	}
+
+	function jobNext( required string idOrName ) {
+		if( isNumeric( arguments.idOrName ) ) {
+			arguments.id= arguments.idOrName;
+		} else {
+			arguments.id= this.jobLookup( arguments.idOrName );
+		}
+		if( arguments.id < 0 ) {
+			var out= this.jobNotFound;
+		} else {
+			var out= this.apiRequest( api= "cron_next", id= arguments.id );
 		}
 		return out;
 	}
 
 	function jobList( string keyword= "" ) {
-		return this.apiRequest( api= "cron.list", keyword= arguments.keyword );
+		return this.apiRequest( api= "cron_list", keyword= arguments.keyword );
 	}
 
 	function jobLookup( required string name, boolean reload= false ) {
@@ -438,11 +471,11 @@ component {
 
 	////////////////////////////////////////////////////////////////////////////////////
 	// GROUP METHODS
-	// https://www.fastcron.com/documentation/api/group
+	// https://www.fastcron.com/reference/group
 	////////////////////////////////////////////////////////////////////////////////////
 
 	function groupList() {
-		return this.apiRequest( api= "group.list" );
+		return this.apiRequest( api= "group_list" );
 	}
 
 	function groupGet( required string idOrName ) {
@@ -451,12 +484,12 @@ component {
 		} else {
 			arguments.id= this.groupLookup( arguments.idOrName );
 		}
-		return this.apiRequest( api= "group.get", id= arguments.id );
+		return this.apiRequest( api= "group_get", id= arguments.id );
 	}
 
 	function groupAdd( required string name ) {
 		var out= this.apiRequest(
-			api= "group.add"
+			api= "group_add"
 		,	name= arguments.name
 		);
 		// cache new group 
@@ -473,7 +506,7 @@ component {
 		} else {
 			arguments.id= this.groupLookup( arguments.idOrName );
 		}
-		var out= this.apiRequest( api= "group.edit", id= arguments.id, name= arguments.name );
+		var out= this.apiRequest( api= "group_edit", id= arguments.id, name= arguments.name );
 		// cache group 
 		if( out.success ) {
 			this.groupCache[ out.response.data.id ]= out.response.data.id;
@@ -488,7 +521,7 @@ component {
 		} else {
 			arguments.id= this.groupLookup( arguments.idOrName );
 		}
-		var out= this.apiRequest( api= "group.delete", id= arguments.id );
+		var out= this.apiRequest( api= "group_delete", id= arguments.id );
 		// un-cache job 
 		if( out.success ) {
 			structDelete( this.groupLookup, arguments.id );
@@ -503,7 +536,7 @@ component {
 		} else {
 			arguments.id= this.groupLookup( arguments.idOrName );
 		}
-		var out= this.apiRequest( api= "group.vanish", id= arguments.id );
+		var out= this.apiRequest( api= "group_vanish", id= arguments.id );
 		// un-cache job 
 		if( out.success ) {
 			structDelete( this.groupLookup, arguments.id );
@@ -519,7 +552,7 @@ component {
 		} else {
 			arguments.id= this.groupLookup( arguments.idOrName );
 		}
-		return this.apiRequest( api= "group.empty", id= arguments.id );
+		return this.apiRequest( api= "group_empty", id= arguments.id );
 	}
 
 	function groupItems( required string idOrName ) {
@@ -529,7 +562,7 @@ component {
 		} else {
 			arguments.id= this.groupLookup( arguments.idOrName );
 		}
-		return this.apiRequest( api= "group.items", id= arguments.id );
+		return this.apiRequest( api= "group_items", id= arguments.id );
 	}
 
 	function groupLookup( required string name, boolean reload= false ) {
@@ -548,6 +581,20 @@ component {
 		}
 		return ( structKeyExists( this.groupCache, arguments.name ) ? this.groupCache[ arguments.name ] : "" );
 	}
+
+	////////////////////////////////////////////////////////////////////////////////////
+	// ACCOUNT METHODS
+	// https://www.fastcron.com/reference/account
+	////////////////////////////////////////////////////////////////////////////////////
+
+	function accountGet() {
+		return this.apiRequest( api= "account_get" );
+	}
+
+	function accountEdit( required string timezone ) {
+		return this.apiRequest( api= "account_edit", timezone= arguments.timezone );
+	}
+
 
 	struct function apiRequest( required string api ) {
 		var http= 0;

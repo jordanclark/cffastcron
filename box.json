@@ -33,5 +33,11 @@
         "postVersion":"package set location='jordanclark/cffastcron#v`package version`'",
         "onRelease":"publish",
         "postPublish":"!git push --follow-tags"
+    },
+    "devDependencies":{
+        "testbox":"^6.2.0+11"
+    },
+    "installPaths":{
+        "testbox":"testbox/"
     }
 }
