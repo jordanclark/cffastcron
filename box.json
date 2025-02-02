@@ -1,7 +1,7 @@
 {
     "name":"cffastcron",
     "slug":"cffastcron",
-    "version":"0.13.0",
+    "version":"1.0.0",
     "author":"Jordan Clark <jordanclark@gmail.com>",
     "keywords":[
         "cron",
@@ -10,7 +10,7 @@
     ],
     "shortDescription":"API client for fastcron.com",
     "type":"modules",
-    "location":"jordanclark/cffastcron#v0.13.0",
+    "location":"jordanclark/cffastcron#v1.0.0",
     "repository":{
         "URL":"https://github.com/jordanclark/cffastcron.git",
         "type":"GIT"
